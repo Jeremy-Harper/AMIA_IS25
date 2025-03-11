@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>4×4 Perceptron Demo (Four Boxes)</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+    .container {
+      display: flex;
+      flex-wrap: wrap; /* allow wrapping on small screens */
+      gap: 2em;
+    }
+    .panel {
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      padding: 1em;
+      width: 300px;
+      box-sizing: border-box;
+    }
+    .panel h2 {
+      margin-top: 0;
+    }
+
+    /* 4×4 grid styling */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, 40px);
+      grid-gap: 4px;
+      margin-bottom: 1em;
+    }
+    .cell {
+      width: 40px;
+      height: 40px;
+      background-color: gray;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: white;
+      font-weight: bold;
+      border-radius: 4px;
+      user-select: none;
+    }
+    .cell.on {
+      background-color: red;
+    }
+
+    /* Weights panel (Box 4) */
+    .weights-container {
+      max-height: 300px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5em;
+    }
+    .weight-control {
+      display: flex;
+      align-items: center;
+      gap: 0.5em;
+      justify-content: space-between;
+    }
+    .weight-control label {
+      width: 40px;
+    }
+    .weight-value {
+      width: 40px;
+      text-align: right;
+    }
+    input[type="range"] {
+      flex: 1;
+    }
+
+    /* Output lines */
+    .output-line {
+      font-weight: bold;
+      margin: 0.5em 0;
+    }
+  </style>
+</head>
+<body>
+
+<h1>4×4 Perceptron Demo (Four Boxes)</h1>
+<p>
+  - <strong>Box 1:</strong> Test Input (4×4).  
+  - <strong>Box 2:</strong> Training Input (4×4) + Train Step.  
+  - <strong>Box 3:</strong> Output (shows how the perceptron classifies the Test Input).  
+  - <strong>Box 4:</strong> Weights &amp; Bias sliders.
+</p>
+
+<div class="container">
+
+  <!-- BOX 1: Test Input Grid -->
+  <div class="panel" id="box1">
+    <h2>Box 1: Test Input Grid</h2>
+    <div class="grid" id="testGrid"></div>
+    <p>
+      <small>Click cells to toggle them between -1 (gray) and +1 (red).</small>
+    </p>
+  </div>
+
+  <!-- BOX 2: Training Input Grid + Train Controls -->
+  <div class="panel" id="box2">
+    <h2>Box 2: Training Input Grid</h2>
+    <div class="grid" id="trainGrid"></div>
+    <p>
+      <label for="targetSelect">Target Label:</label>
+      <select id="targetSelect">
+        <option value="-1">-1</option>
+        <option value="1" selected>+1</option>
+      </select>
+    </p>
+    <p>
+      <label for="learningRateSelect">Learning Rate:</label>
+      <select id="learningRateSelect">
+        <option value="0.01">0.01</option>
+        <option value="0.1" selected>0.1</option>
+        <option value="1.0">1.0</option>
+      </select>
+    </p>
+    <button id="trainBtn">Train Step</button>
+  </div>
+
+  <!-- BOX 3: Output for Test Input -->
+  <div class="panel" id="box3">
+    <h2>Box 3: Output (Test Input)</h2>
+    <div class="output-line">
+      Sum = <span id="sumOutput">0.00</span>
+    </div>
+    <div class="output-line">
+      Classification = <span id="classOutput">?</span>
+    </div>
+    <div class="output-line">
+      Sign = <span id="signOutput"></span>
+    </div>
+    <p>
+      <small>This shows how the perceptron (with current weights) classifies the 4×4 pattern in Box 1.</small>
+    </p>
+  </div>
+
+  <!-- BOX 4: Weights & Bias Sliders -->
+  <div class="panel" id="box4">
+    <h2>Box 4: Weights &amp; Bias</h2>
+    <div class="weights-container" id="weightsContainer"></div>
+  </div>
+
+</div>
+
+<script>
+/*************************************************************
+  1) DATA STRUCTURES
+*************************************************************/
+// Each grid has 16 cells, each cell is +1 or -1
+let testInputs = new Array(16).fill(-1);   // Box 1
+let trainInputs = new Array(16).fill(-1);  // Box 2
+
+// The perceptron has 16 weights + 1 bias
+let weights = new Array(16).fill(0);
+let bias = 0;
+
+/*************************************************************
+  2) DOM ELEMENTS
+*************************************************************/
+const testGrid = document.getElementById('testGrid');
+const trainGrid = document.getElementById('trainGrid');
+const sumOutput = document.getElementById('sumOutput');
+const classOutput = document.getElementById('classOutput');
+const signOutput = document.getElementById('signOutput');
+const weightsContainer = document.getElementById('weightsContainer');
+
+const targetSelect = document.getElementById('targetSelect');
+const learningRateSelect = document.getElementById('learningRateSelect');
+const trainBtn = document.getElementById('trainBtn');
+
+/*************************************************************
+  3) HELPER: CREATE A 4×4 GRID
+     - isTest = true  => modifies testInputs
+     - isTest = false => modifies trainInputs
+*************************************************************/
+function createGrid(container, isTest) {
+  for (let i = 0; i < 16; i++) {
+    const cell = document.createElement('div');
+    cell.classList.add('cell'); // default: gray, -1
+    cell.textContent = '-1';
+    cell.dataset.index = i;
+
+    cell.addEventListener('click', () => {
+      if (isTest) {
+        toggleCell(testInputs, i, cell);
+        // Recompute the output for the Test Input
+        updateTestOutput();
+      } else {
+        toggleCell(trainInputs, i, cell);
+      }
+    });
+
+    container.appendChild(cell);
+  }
+}
+
+function toggleCell(inputArray, index, cellDiv) {
+  if (inputArray[index] === -1) {
+    inputArray[index] = +1;
+    cellDiv.classList.add('on');
+    cellDiv.textContent = '+1';
+  } else {
+    inputArray[index] = -1;
+    cellDiv.classList.remove('on');
+    cellDiv.textContent = '-1';
+  }
+}
+
+/*************************************************************
+  4) BUILD THE WEIGHTS & BIAS SLIDERS (Box 4)
+*************************************************************/
+function createWeightSliders() {
+  // Create 16 sliders for the weights
+  for (let i = 0; i < 16; i++) {
+    const row = document.createElement('div');
+    row.classList.add('weight-control');
+
+    const label = document.createElement('label');
+    label.textContent = 'w' + i;
+    row.appendChild(label);
+
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = '-2';
+    slider.max = '2';
+    slider.step = '0.01';
+    slider.value = '0';
+    slider.dataset.index = i;
+
+    const valSpan = document.createElement('span');
+    valSpan.classList.add('weight-value');
+    valSpan.textContent = '0.00';
+
+    // On slider move, update weights array
+    slider.addEventListener('input', () => {
+      const idx = parseInt(slider.dataset.index);
+      weights[idx] = parseFloat(slider.value);
+      valSpan.textContent = parseFloat(slider.value).toFixed(2);
+      updateTestOutput();
+    });
+
+    row.appendChild(slider);
+    row.appendChild(valSpan);
+
+    weightsContainer.appendChild(row);
+  }
+
+  // Bias slider
+  const biasRow = document.createElement('div');
+  biasRow.classList.add('weight-control');
+  const biasLabel = document.createElement('label');
+  biasLabel.textContent = 'b';
+  biasRow.appendChild(biasLabel);
+
+  const biasSlider = document.createElement('input');
+  biasSlider.type = 'range';
+  biasSlider.min = '-2';
+  biasSlider.max = '2';
+  biasSlider.step = '0.01';
+  biasSlider.value = '0';
+
+  const biasValSpan = document.createElement('span');
+  biasValSpan.classList.add('weight-value');
+  biasValSpan.textContent = '0.00';
+
+  biasSlider.addEventListener('input', () => {
+    bias = parseFloat(biasSlider.value);
+    biasValSpan.textContent = parseFloat(biasSlider.value).toFixed(2);
+    updateTestOutput();
+  });
+
+  biasRow.appendChild(biasSlider);
+  biasRow.appendChild(biasValSpan);
+  weightsContainer.appendChild(biasRow);
+}
+
+/*************************************************************
+  5) COMPUTE PERCEPTRON OUTPUT FOR A GIVEN INPUT (Box 1 or 2)
+*************************************************************/
+function computeOutput(inputArray) {
+  let sum = 0;
+  for (let i = 0; i < 16; i++) {
+    sum += weights[i] * inputArray[i];
+  }
+  sum += bias;
+  const classification = (sum >= 0) ? +1 : -1;
+  return { sum, classification };
+}
+
+function updateTestOutput() {
+  const { sum, classification } = computeOutput(testInputs);
+  sumOutput.textContent = sum.toFixed(2);
+  classOutput.textContent = (classification === +1) ? '+1' : '-1';
+  
+  // New field: Yes if positive, No if negative, blank if zero.
+  if (sum > 0) {
+    signOutput.textContent = "Yes";
+  } else if (sum < 0) {
+    signOutput.textContent = "No";
+  } else {
+    signOutput.textContent = "";
+  }
+}
+
+/*************************************************************
+  6) TRAIN STEP
+     - Uses the 4×4 pattern from Box 2 (trainInputs)
+     - Uses the target label from targetSelect
+     - Updates weights & bias
+     - Then refreshes the sliders and re-computes Box 3
+*************************************************************/
+function trainStep() {
+  const { sum, classification } = computeOutput(trainInputs);
+  const target = parseFloat(targetSelect.value);
+  
+  // Always update, even if already correct.
+  const eta = parseFloat(learningRateSelect.value);
+  for (let i = 0; i < 16; i++) {
+    weights[i] += eta * (target - classification) * trainInputs[i];
+  }
+  bias += eta * (target - classification);
+
+  // Refresh the sliders visually
+  refreshSliders();
+  // Update the test output
+  updateTestOutput();
+}
+
+function refreshSliders() {
+  // Box 4 has 16 weight sliders + 1 bias slider
+  const sliderRows = weightsContainer.querySelectorAll('.weight-control');
+  // The first 16 rows are w0..w15, the last row is bias
+  sliderRows.forEach((row, idx) => {
+    const slider = row.querySelector('input[type="range"]');
+    const valSpan = row.querySelector('.weight-value');
+
+    if (idx < 16) {
+      slider.value = weights[idx].toFixed(2);
+      valSpan.textContent = slider.value;
+    } else {
+      // bias
+      slider.value = bias.toFixed(2);
+      valSpan.textContent = slider.value;
+    }
+  });
+}
+
+/*************************************************************
+  7) INITIALIZE EVERYTHING
+*************************************************************/
+createGrid(testGrid, true);   // Box 1
+createGrid(trainGrid, false); // Box 2
+createWeightSliders();
+updateTestOutput(); // show initial classification of test input
+
+// TRAIN button
+trainBtn.addEventListener('click', trainStep);
+</script>
+
+</body>
+</html>
